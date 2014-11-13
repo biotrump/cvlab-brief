@@ -1,0 +1,176 @@
+BRIEF Demo Code                                                      Version 1.0
+===============                                         michael.calonder@epfl.ch
+                                   http://cvlab.epfl.ch/software/brief/index.php
+
+Thank you for your interest in BRIEF. This is an implementation that closely
+follows the version in [1]. The main difference between this implementation and
+that of [1] is that the former relies on integral images for computing the mean
+filter response of an image patch where the latter employs Gaussian filtering.
+Since the accuracy of the two has been proven identical, the mean filter is
+preferable over the Gaussian filter for its lower computational complexity. The
+code is released under the GNU General Public License V2.
+
+
+1. BUILDING THE CODE
+--------------------
+
+The only dependency is the OpenCV library which is freely available at [2]. Once
+installed, double-check that pkg-config can locate it. To test this, type
+   $ pkg-config opencv --libs --cflags
+which should result in somehting similar to
+   -I/usr/local/include/opencv -L/usr/local/lib -lcxcore -lcv -lhighgui -lcvaux.
+
+To build the code:
+   1. cd brief
+   2. make   -->   creates ./lib/libbrief.so
+   3. cd ../test_app
+   4. make   -->   creates ./main
+
+Note: For matching binary vectors, the POPCNT instruction from the SSE4.2
+instruction set is particularly efficient and results in a tremendous speed-up.
+Intel CPUs starting from the i7 series support this instruction. Under Linux,
+POPCNT availability can be checked via
+   $ less /proc/cpuinfo | grep sse4_2
+If you find sse4_2 or alternatively the popcnt flag defined, you should edit the
+Makefile for the test application (test_app/Makefile) and uncomment -msse4.2. Be
+aware that doing so for a CPU without POPCNT will result in an Invalid
+Instruction.
+
+
+2. RUNNING THE CODE
+-------------------
+
+When executing the code, the system must be able to localize the library
+libbrief.so. For convenience, you can simply link that file into the test_app
+folder by typing
+   [test_app]$ ln -s ../brief/lib/libbrief.so
+or, alternatively, you can modify the LD_LIBRARY_PATH environment variable to
+include the lib directory,
+   $ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:../brief/lib
+
+The demo code shows how to do three things with BRIEF:
+
+   1) Performing point matching and compute the rate of success.
+      For example,
+         $ ./main --match 3
+      will detect feature points in wall/img1.ppm and wall/img3.ppm, compute the
+      corresponding BRIEF descriptors, match them and compute the percentage of
+      correct matches. The output should look like
+         [OK] Got 88.97% of 1306 retrieved matches right
+      The implementation uses SURF points but you can use a point detector of
+      your choice.
+
+   2) Measuring time required to build the descriptors.
+      For example, typing
+         $ ./main --time-desc 300
+      will evaluate the time required for computing around 2800 descriptors by
+      averaging the result over 300 computations. The output I get is
+         [OK] Computing 2835 descriptors took 13.430 ms (~ 2.426 ms/512 desc)
+
+   3) Measuring time required to match a set of binary vectors.
+      For example,
+         $ ./main --time-match 100 512
+      computes 512^2 = 262'144 distances and averages the result over 100 runs.
+      The results in
+         [OK] Matching exhaustively 512 vectors (3e+05 dist comp) took 12.846 ms
+      on my machine which does NOT support the above POPCNT instruction. Clearly
+      one could take advantage of fast bitcount implementations but doing so
+      will hardly be faster than POPCNT--which will soon be widely available.
+
+In case of problems such as SEGFAULTs, remember to build and run the code in
+DEBUG mode which will enable a plethora of (expensive) run-time checks, helping
+you to locate the issue more quickly.
+
+
+3. HARDCODED PARAMETERS
+-----------------------
+
+There is a handful of hardcoded parameters inside the BRIEF class.
+
+   DESC_LEN
+      Descriptor length, or the number of tests. Default: 256 (i.e. BRIEF-32).
+
+   INIT_PATCH_SZ
+      The image patch size around a keypoint in which the tests are defined. The
+      "INIT" prefix indicates that the patch size can vary as soon as the
+      rotateTests() and scaleTests() functions are used. Default: 48.
+
+   INIT_KERNEL_SZ
+      The kernel size of the mean filter in pixels used to smooth the patch. The
+      actual kernel size can differ when scaleTests() is called, causing the
+      kernel to rescale. Default: 9.
+
+   USE_INTEGRAL_IMAGE
+      If 1, we pre-compute an integral image allowing for fast smoothing. The
+      speed-up is notable for small and medium-sized images. Default: 1.
+
+   SMOOTH_ENTIRE_PATCH (defined iff USE_INTEGRAL_IMAGE==1)
+      If 1, the entire patch is smoothed before the tests are applied. However,
+      if the number of tests is small compared to the patch area, it is usually
+      more efficient to smooth only around the test locations rather than the
+      entire patch. Default: 0.
+
+   SOS_ORI
+      If your feature point detector provides an orientation, BRIEF can rotate
+      the tests into a canonical orientation before using them, allowing the
+      descriptor to become rotationally invariant. BRIEF's orientation is 0 at
+      three o'clock and varies between -PI and +PI. To use the functionality,
+      you will have to extend interpretScale() to correctly map the orientation
+      of your detector to [-PI,PI]. For illustration, we include this done for
+      OpenCV's SURF implementation which can be enabled by setting SOS_ORI to
+      SOS_SURF_OPENCV. Default: SOS_DO_NOT_INTERPRET.
+
+   SOS_SCALE
+      Same as SOS_ORI but for scale.
+
+Enabling the experimental features SOS_ORI and SOS_SCALE can cause one or more
+tests to fall outside the image region which potentially causes SEGFAULTS. This
+can be prevented by compiling the code in DEBUG mode since this enables checks
+that allow to skip tests outside the image area.
+
+
+4. PLEASE NOTE
+--------------
+
+A note regarding the fraction of correctly retrieved matches: The values are NOT
+directly comparable with those in [1], where a similar measure known as
+"recognition rate" was employed. The reasons are:
+  * Here we match 1000-1500 points where in [1] the default number of matches
+    was 512.
+  * Here the method has a way to reject matches using a left-right consistency
+    check. In [1], the method had to establish exactly one match for each
+    feature point. In other words, [1] required the methods to match two
+    same-sized sets of features, from which outliers have been removed. Here we
+    allow outliers in both sets. Nevertheless, neither of the methods performs
+    checks for geometric consistency.
+
+The code has only research quality and is therefore not particularly optimized
+for speed. Suggestions for improvements are most welcome.
+
+The test data in the test_app/wall folder is publicly available from
+   http://www.robots.ox.ac.uk/~vgg/research/affine
+and has been included without modifications.
+
+
+5. WINDOWS AND MAC OSX
+----------------------
+
+This version does not provide an automated way to build the code under Windows
+or Mac OSX, though it should be fairly easy to do so: The source code is
+standard C++ and depends on OpenCV only, which is cross-platform [2].
+
+
+6. REFERENCES
+-------------
+
+When referring to BRIEF, please cite [1].
+
+[1] @inproceedings{Calonder10-brief,
+       author = "M. Calonder and V. Lepetit and C. Strecha and P. Fua",
+       title = {{BRIEF: Binary Robust Independent Elementary Features}},
+       booktitle = "European Conference on Computer Vision",
+       month = "September",
+       year = 2010
+    }
+
+[2] http://opencv.willowgarage.com
